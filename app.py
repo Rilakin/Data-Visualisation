@@ -5,6 +5,8 @@ import dash_table
 import hiplot
 import pathlib
 from json import load
+
+import pandas
 from flask import request
 from os import fspath
 import plotly.graph_objects as go
@@ -42,11 +44,9 @@ def build_trial_dictionary(trial_json_to_build, hyperparameters):
 
 
 def read_data(**kwargs):
+    """This Method reads the trial data from JSON Files"""
     # get path and search for trials
-    hypersearch_directory = kwargs.get("project_dir")
-    project_name = kwargs.get("project_name") + "--dense"
-    path = pathlib.Path(hypersearch_directory)
-    trial_dir = path.joinpath("RESULTS", project_name, kwargs.get("search_dir"))
+    trial_dir = pathlib.Path(kwargs.get("json_path"))
     trial_path_list = list(trial_dir.glob("**/trial.json"))
 
     # open trial.json files
@@ -68,6 +68,10 @@ def read_data(**kwargs):
     return data
 
 
+def read_csv(**kwargs):
+    return pandas.read_csv(kwargs.get("csv_path"))
+
+
 def create_hiplot_html(**kwargs):
     # create hiplot_graph
     hiplot_experiment = hiplot.Experiment.from_iterable(read_data(**kwargs))
@@ -76,11 +80,17 @@ def create_hiplot_html(**kwargs):
 
 
 def create_plotly_plot_list(dataframe):
+    """Method that reads the dataframe content and returns a list with dictionaries for each column.
+    Those dictionaries contain the column name and its values.
+    If the column consists of string values, a special encoded labeling for the values is applied,
+    to display the values properly"""
     dimensions_list = []
     for column in dataframe:
+        # labeling for string types
         if dataframe[column].dtype == "object":
             categorized_string_values = dataframe[column].astype("category")
             encoded_string_values = categorized_string_values.cat.codes
+            # only allow unique values in sorted codes and sorted list
             sorted_codes = list(set(encoded_string_values))
             sorted_codes.sort()
             sorted_list = list(set(dataframe[column].values))
@@ -115,8 +125,12 @@ def plot(**kwargs):
     hiplot_html = create_hiplot_html(**kwargs)
 
     # Plotly preparations
-    data = read_data(**kwargs)
-    dataframe = pd.DataFrame(data)
+    if kwargs.get("csv_path") != "":
+        dataframe = read_csv(**kwargs)
+    else:
+        data = read_data(**kwargs)
+        dataframe = pd.DataFrame(data)
+
     plotly_graph = create_plotly_plot(dataframe)
 
     # App Layout
@@ -184,7 +198,7 @@ def plot(**kwargs):
     def close_dashboard(btn1):
         changed_id = [p["prop_id"] for p in dash.callback_context.triggered][0]
         if "close-hiplot" in changed_id:
-            #shutdown()
+            # shutdown()
             return
 
     @app.callback(Output("hiplot", "hidden"),
@@ -195,7 +209,6 @@ def plot(**kwargs):
             return False, {"display": "inline-block"}
         else:
             return True, {"display": "none"}
-
 
     @app.callback(Output("dashPlot", "hidden"),
                   Output("refresh-checkbox-plotly", "style"),
@@ -220,8 +233,11 @@ def plot(**kwargs):
                   Input("refresh-checkbox-plotly", "value"))
     def refresh_plotly(n_intervals, value):
         if value:
-            new_data = read_data(**kwargs)
-            new_dataframe = pd.DataFrame(new_data)
+            if kwargs.get("csv_path") != "":
+                new_dataframe = read_csv(**kwargs)
+            else:
+                new_data = read_data(**kwargs)
+                new_dataframe = pd.DataFrame(data)
             return new_dataframe.to_dict("records")
         else:
             return dash.no_update
@@ -238,10 +254,14 @@ def plot(**kwargs):
 
 
 if __name__ == "__main__":
+    """Search parameters currently only working for JSON search.
+    An empty CSV path will signal the JSON search for plotly.
+    HiPlot currently only does a JSON search"""
     url = "127.0.0.1:5000"
     assert ":" in url, 'Url must be formatted like: "host:port".'
     host, port = url.split(":")
-    app = plot(
-        **{"project_name": "test", "project_dir": "F:\TestSample\Viscoelasticity", "search_dir": "hyperband_search_00",
-         "search_parameters": "num_layers,activation,units,learning_rate"})
-    app.run_server(debug=False, host=host, port=port)
+    application = plot(
+        **{"search_parameters": "num_layers,activation,units,learning_rate",
+           "csv_path": "./test_csv.txt",
+           "json_path": "./hyperband_search_00"})
+    application.run_server(debug=False, host=host, port=port)
